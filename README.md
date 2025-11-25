@@ -318,6 +318,25 @@ Search for theorems in Mathlib using [leansearch.net](https://leansearch.net) (n
 ```
 </details>
 
+#### leansearch_leandex
+
+
+<details>
+<summary>Example output (query by LLM: `bijective map from injective`)</summary>
+
+```json
+  {'id': 25217,
+  'primary_declaration': {'lean_name': 'Nat.add'},
+  'source_file': 'Init/Prelude.lean',
+  'range_start_line': 1705,
+  'range_end_line': 1715,
+  'display_statement_text': '。。。',
+  'docstring': '...',
+  'informal_description': '...'},
+  ...
+```
+</details>
+
 #### lean_loogle
 
 Search for Lean definitions and theorems using [loogle.lean-lang.org](https://loogle.lean-lang.org/).

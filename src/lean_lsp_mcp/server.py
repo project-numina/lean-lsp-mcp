@@ -385,7 +385,6 @@ def file_outline(ctx: Context, file_path: str) -> str:
 
 
 @mcp.tool("lean_diagnostic_messages")
-@mcp.tool("lean_diagnostic_messages")
 @log_tool_execution
 def diagnostic_messages(
     ctx: Context,

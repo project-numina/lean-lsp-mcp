@@ -11,3 +11,5 @@ tests/mathlib_project/
 
 # Local temp files
 .tmp/
+
+*.log

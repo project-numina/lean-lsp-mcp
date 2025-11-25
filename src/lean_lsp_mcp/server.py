@@ -13,6 +13,7 @@ import subprocess
 import uuid
 import requests
 from pathlib import Path
+import json
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger, configure_logging

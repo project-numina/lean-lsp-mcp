@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-import json
+import orjson
 from collections.abc import Callable
 from pathlib import Path
 from typing import AsyncContextManager
@@ -16,8 +16,8 @@ def _first_json_block(result) -> dict[str, str] | None:
         if not text:
             continue
         try:
-            return json.loads(text)
-        except json.JSONDecodeError:
+            return orjson.loads(text)
+        except orjson.JSONDecodeError:
             continue
     return None
 
@@ -109,3 +109,21 @@ async def test_search_tools(
         if entry is None:
             pytest.skip("lean_leansearch did not return JSON content")
         assert {"module_name", "name", "type"} <= set(entry.keys())
+
+        # Test lean_finder with different query types
+        finder_informal = await client.call_tool(
+            "lean_leanfinder",
+            {
+                "query": "If two algebraic elements have the same minimal polynomial, are they related by a field isomorphism?",
+                "num_results": 3,
+            },
+        )
+        finder_results = _first_json_block(finder_informal)
+        if finder_results:
+            assert isinstance(finder_results, dict) and len(finder_results.keys()) == 3
+            assert {"full_name", "formal_statement", "informal_statement"} <= set(
+                finder_results.keys()
+            )
+        else:
+            finder_text = result_text(finder_informal)
+            assert finder_text and len(finder_text) > 0

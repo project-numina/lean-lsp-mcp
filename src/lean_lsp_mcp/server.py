@@ -51,6 +51,88 @@ logger = get_logger(__name__)
 _RG_AVAILABLE, _RG_MESSAGE = check_ripgrep_status()
 
 
+def log_tool_execution(func):
+    """记录工具执行情况的装饰器，支持同步和异步函数"""
+    
+    # 处理异步函数
+    if asyncio.iscoroutinefunction(func):
+        @functools.wraps(func)
+        async def async_wrapper(*args, **kwargs):
+            tool_name = func.__name__
+            start_time = time.time()
+            
+            try:
+                # 执行原异步函数
+                result = await func(*args, **kwargs)
+                elapsed = time.time() - start_time
+                
+                # 生成结果摘要
+                if isinstance(result, list):
+                    summary = f"{len(result)} items"
+                elif isinstance(result, dict):
+                    summary = f"{len(result)} keys"
+                elif isinstance(result, str):
+                    # 检查是否是错误信息
+                    if any(keyword in result.lower() for keyword in ['error', 'invalid', 'failed', 'not found']):
+                        summary = f"⚠️ {result[:80]}..." if len(result) > 80 else f"⚠️ {result}"
+                    else:
+                        summary = f"string ({len(result)} chars)"
+                elif result is None:
+                    summary = "None"
+                else:
+                    summary = str(type(result).__name__)
+                
+                # 记录成功
+                logger.info(f"✅ {tool_name}: {summary} ({elapsed:.2f}s)")
+                return result
+                
+            except Exception as e:
+                elapsed = time.time() - start_time
+                error_msg = str(e)[:100]
+                logger.error(f"❌ {tool_name}: {error_msg} ({elapsed:.2f}s)")
+                raise
+        
+        return async_wrapper
+    
+    # 处理同步函数
+    else:
+        @functools.wraps(func)
+        def sync_wrapper(*args, **kwargs):
+            tool_name = func.__name__
+            start_time = time.time()
+            
+            try:
+                # 执行原函数
+                result = func(*args, **kwargs)
+                elapsed = time.time() - start_time
+                
+                # 生成结果摘要
+                if isinstance(result, list):
+                    summary = f"{len(result)} items"
+                elif isinstance(result, dict):
+                    summary = f"{len(result)} keys"
+                elif isinstance(result, str):
+                    # 检查是否是错误信息
+                    if any(keyword in result.lower() for keyword in ['error', 'invalid', 'failed', 'not found']):
+                        summary = f"⚠️ {result[:80]}..." if len(result) > 80 else f"⚠️ {result}"
+                    else:
+                        summary = f"string ({len(result)} chars)"
+                elif result is None:
+                    summary = "None"
+                else:
+                    summary = str(type(result).__name__)
+                
+                # 记录成功
+                logger.info(f"✅ {tool_name}: {summary} ({elapsed:.2f}s)")
+                return result
+                
+            except Exception as e:
+                elapsed = time.time() - start_time
+                error_msg = str(e)[:100]
+                logger.error(f"❌ {tool_name}: {error_msg} ({elapsed:.2f}s)")
+                raise
+        
+        return sync_wrapper
 # Server and context
 @dataclass
 class AppContext:
@@ -129,6 +211,7 @@ def rate_limited(category: str, max_requests: int, per_seconds: int):
                 if timestamp > current_time - per_seconds
             ]
             if len(rate_limit[category]) >= max_requests:
+                logger.warning(f"🚫 {func.__name__}: Rate limited") 
                 return f"Tool limit exceeded: {max_requests} requests per {per_seconds} s. Try again later."
             rate_limit[category].append(current_time)
             return func(*args, **kwargs)
@@ -141,6 +224,7 @@ def rate_limited(category: str, max_requests: int, per_seconds: int):
 
 # Project level tools
 @mcp.tool("lean_build")
+@log_tool_execution
 async def lsp_build(
     ctx: Context, lean_project_path: str = None, clean: bool = False
 ) -> str:
@@ -155,6 +239,7 @@ async def lsp_build(
     Returns:
         str: Build output or error msg
     """
+    logger.info(f"🔧 Tool: lean_build(lean_project_path={lean_project_path}, clean={clean})")
     if not lean_project_path:
         lean_project_path_obj = ctx.request_context.lifespan_context.lean_project_path
     else:
@@ -242,6 +327,7 @@ async def lsp_build(
 # File level tools
 @mcp.tool("lean_file_contents")
 @deprecated
+@log_tool_execution
 def file_contents(ctx: Context, file_path: str, annotate_lines: bool = True) -> str:
     """Get the text contents of a Lean file, optionally with line numbers.
 
@@ -254,6 +340,8 @@ def file_contents(ctx: Context, file_path: str, annotate_lines: bool = True) -> 
     Returns:
         str: File content or error msg
     """
+    logger.info(f"🔧 Tool: lean_file_contents(file_path={file_path}, annotate_lines={annotate_lines})")
+    
     # Infer project path but do not start a client
     if file_path.endswith(".lean"):
         infer_project_path(ctx, file_path)  # Silently fails for non-project files
@@ -297,6 +385,7 @@ def file_outline(ctx: Context, file_path: str) -> str:
 
 
 @mcp.tool("lean_diagnostic_messages")
+@log_tool_execution
 def diagnostic_messages(
     ctx: Context,
     file_path: str,
@@ -320,6 +409,7 @@ def diagnostic_messages(
     Returns:
         List[str] | str: Diagnostic msgs or error msg
     """
+    logger.info(f"🔧 Tool: lean_diagnostic_messages(file_path={file_path})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -348,6 +438,7 @@ def diagnostic_messages(
 
 
 @mcp.tool("lean_goal")
+@log_tool_execution
 def goal(ctx: Context, file_path: str, line: int, column: Optional[int] = None) -> str:
     """Get the proof goals (proof state) at a specific location in a Lean file.
 
@@ -364,6 +455,7 @@ def goal(ctx: Context, file_path: str, line: int, column: Optional[int] = None) 
     Returns:
         str: Goal(s) or error msg
     """
+    logger.info(f"🔧 Tool: lean_goal(file_path={file_path}, line={line}, column={column})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -398,6 +490,7 @@ def goal(ctx: Context, file_path: str, line: int, column: Optional[int] = None) 
 
 
 @mcp.tool("lean_term_goal")
+@log_tool_execution
 def term_goal(
     ctx: Context, file_path: str, line: int, column: Optional[int] = None
 ) -> str:
@@ -411,6 +504,7 @@ def term_goal(
     Returns:
         str: Expected type or error msg
     """
+    logger.info(f"🔧 Tool: lean_term_goal(file_path={file_path}, line={line}, column={column})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -435,6 +529,7 @@ def term_goal(
 
 
 @mcp.tool("lean_hover_info")
+@log_tool_execution
 def hover(ctx: Context, file_path: str, line: int, column: int) -> str:
     """Get hover info (docs for syntax, variables, functions, etc.) at a specific location in a Lean file.
 
@@ -446,6 +541,7 @@ def hover(ctx: Context, file_path: str, line: int, column: int) -> str:
     Returns:
         str: Hover info or error msg
     """
+    logger.info(f"🔧 Tool: lean_hover_info(file_path={file_path}, line={line}, column={column})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -475,6 +571,7 @@ def hover(ctx: Context, file_path: str, line: int, column: int) -> str:
 
 
 @mcp.tool("lean_completions")
+@log_tool_execution
 def completions(
     ctx: Context, file_path: str, line: int, column: int, max_completions: int = 32
 ) -> str:
@@ -494,6 +591,7 @@ def completions(
     Returns:
         str: List of possible completions or error msg
     """
+    logger.info(f"🔧 Tool: lean_completions(file_path={file_path}, line={line}, column={column}, max={max_completions})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -543,6 +641,7 @@ def completions(
 
 
 @mcp.tool("lean_declaration_file")
+@log_tool_execution
 def declaration_file(ctx: Context, file_path: str, symbol: str) -> str:
     """Get the file contents where a symbol/lemma/class/structure is declared.
 
@@ -557,6 +656,7 @@ def declaration_file(ctx: Context, file_path: str, symbol: str) -> str:
     Returns:
         str: File contents or error msg
     """
+    logger.info(f"🔧 Tool: lean_declaration_file(file_path={file_path}, symbol='{symbol}')")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -593,6 +693,7 @@ def declaration_file(ctx: Context, file_path: str, symbol: str) -> str:
 
 
 @mcp.tool("lean_multi_attempt")
+@log_tool_execution
 def multi_attempt(
     ctx: Context, file_path: str, line: int, snippets: List[str]
 ) -> List[str] | str:
@@ -614,6 +715,7 @@ def multi_attempt(
     Returns:
         List[str] | str: Diagnostics and goal states or error msg
     """
+    logger.info(f"🔧 Tool: lean_multi_attempt(file_path={file_path}, line={line}, snippets_count={len(snippets)})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -655,6 +757,7 @@ def multi_attempt(
 
 
 @mcp.tool("lean_run_code")
+@log_tool_execution
 def run_code(ctx: Context, code: str) -> List[str] | str:
     """Run a complete, self-contained code snippet and return diagnostics.
 
@@ -667,6 +770,7 @@ def run_code(ctx: Context, code: str) -> List[str] | str:
     Returns:
         List[str] | str: Diagnostics msgs or error msg
     """
+    logger.info(f"🔧 Tool: lean_run_code(code_length={len(code)})")
     lifespan_context = ctx.request_context.lifespan_context
     lean_project_path = lifespan_context.lean_project_path
     if lean_project_path is None:
@@ -731,6 +835,7 @@ def run_code(ctx: Context, code: str) -> List[str] | str:
 
 
 @mcp.tool("lean_local_search")
+@log_tool_execution
 def local_search(
     ctx: Context, query: str, limit: int = 10, project_root: str | None = None
 ) -> List[Dict[str, str]] | str:
@@ -747,6 +852,7 @@ def local_search(
     Returns:
         List[Dict[str, str]] | str: Matches as ``{"name", "kind", "file"}`` or error message.
     """
+    logger.info(f"🔧 Tool: lean_local_search(query='{query}', limit={limit})")
     if not _RG_AVAILABLE:
         return _RG_MESSAGE
 
@@ -776,6 +882,7 @@ def local_search(
 
 
 @mcp.tool("lean_leansearch")
+@log_tool_execution
 @rate_limited("leansearch", max_requests=3, per_seconds=30)
 def leansearch(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
     """Search for Lean theorems, definitions, and tactics using leansearch.net.
@@ -794,6 +901,7 @@ def leansearch(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | s
     Returns:
         List[Dict] | str: Search results or error msg
     """
+    logger.info(f"🔧 Tool: lean_leansearch(query='{query}', num_results={num_results})")
     try:
         headers = {"User-Agent": "lean-lsp-mcp/0.1", "Content-Type": "application/json"}
         payload = orjson.dumps({"num_results": str(num_results), "query": [query]})
@@ -823,8 +931,10 @@ def leansearch(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | s
         return f"leansearch error:\n{str(e)}"
 
 @mcp.tool("lean_leandex")
+@log_tool_execution
 # @rate_limited("leandex", max_requests=3, per_seconds=30)
 def leandex(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
+    logger.info(f"🔧 Tool: lean_leandex(query='{query}', num_results={num_results})")
     try:
 
         url = "https://leandex.projectnumina.ai/api/v1/search"
@@ -860,6 +970,7 @@ def leandex(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
 
 
 @mcp.tool("lean_loogle")
+@log_tool_execution
 @rate_limited("loogle", max_requests=3, per_seconds=30)
 def loogle(ctx: Context, query: str, num_results: int = 8) -> List[dict] | str:
     """Search for definitions and theorems using loogle.
@@ -880,6 +991,7 @@ def loogle(ctx: Context, query: str, num_results: int = 8) -> List[dict] | str:
     Returns:
         List[dict] | str: Search results or error msg
     """
+    logger.info(f"🔧 Tool: lean_loogle(query='{query}', num_results={num_results})")
     try:
         req = urllib.request.Request(
             f"https://loogle.lean-lang.org/json?q={urllib.parse.quote(query)}",
@@ -954,6 +1066,7 @@ def leanfinder(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | s
 
 
 @mcp.tool("lean_state_search")
+@log_tool_execution
 @rate_limited("lean_state_search", max_requests=3, per_seconds=30)
 def state_search(
     ctx: Context, file_path: str, line: int, column: int, num_results: int = 5
@@ -971,6 +1084,7 @@ def state_search(
     Returns:
         List | str: Search results or error msg
     """
+    logger.info(f"🔧 Tool: lean_state_search(file_path={file_path}, line={line}, column={column}, num_results={num_results})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"
@@ -1007,6 +1121,7 @@ def state_search(
 
 
 @mcp.tool("lean_hammer_premise")
+@log_tool_execution
 @rate_limited("hammer_premise", max_requests=3, per_seconds=30)
 def hammer_premise(
     ctx: Context, file_path: str, line: int, column: int, num_results: int = 32
@@ -1022,6 +1137,7 @@ def hammer_premise(
     Returns:
         List[str] | str: List of relevant premises or error message
     """
+    logger.info(f"🔧 Tool: lean_hammer_premise(file_path={file_path}, line={line}, column={column}, num_results={num_results})")
     rel_path = setup_client_for_file(ctx, file_path)
     if not rel_path:
         return "Invalid Lean file path: Unable to start LSP server or load file"

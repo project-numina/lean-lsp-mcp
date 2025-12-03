@@ -14,6 +14,8 @@ import uuid
 import requests
 from pathlib import Path
 import json
+from google import genai
+from google.genai import types
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger, configure_logging
@@ -161,6 +163,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
                 "leanfinder": [],
                 "lean_state_search": [],
                 "hammer_premise": [],
+                "gemini_code_golf": [],
             },
             lean_search_available=_RG_AVAILABLE,
         )
@@ -1178,6 +1181,70 @@ def hammer_premise(
     except Exception as e:
         return f"lean hammer premise error:\n{str(e)}"
 
+
+@mcp.tool("gemini_code_golf")
+@log_tool_execution
+def gemini_code_golf(
+    ctx: Context,
+    model : str ="gemini-3-pro-preview",
+    temperature: float = 0.7
+) -> str:
+    """调用Google Gemini模型生成文本回复。
+
+    这个工具使用Google的Gemini API来生成文本回复。你需要设置GOOGLE_API_KEY环境变量。
+
+    Args:
+        ctx (str, optional): 等待被golf的lean code。
+        model (str, optional): 使用的Gemini模型。默认是"gemini-3-pro-preview"
+        temperature (float, optional): 生成温度，控制随机性。默认0.7
+
+    Returns:
+        str: Gemini模型的回复或错误信息
+    """
+    
+    PROMPT = """You are given a correct Lean 4 proof of a mathematical theorem.
+Your goal is to simplify and clean up the proof, making it shorter and more readable while ensuring it is still correct.
+
+Here is the original proof:
+```lean4
+{formal_code}
+```
+
+Now, provide your simplified proof. Do NOT modify the theorem or header, and surround your proof in ```lean4 and ```` tags."""
+
+    prompt = PROMPT.format(formal_code=str(ctx))
+    print(prompt)
+    logger.info(f"🔧 Tool: call_gemini(prompt='{prompt[:50]}...', model={model}, temperature={temperature})")
+    
+
+    # 检查API密钥
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return "错误: 请设置GEMINI_API_KEY环境变量。"
+
+    try:
+        # 配置Gemini
+        client = genai.Client(api_key = api_key)
+
+        # 生成回复
+        response = client.models.generate_content(
+            model=model,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                temperature=temperature
+            )
+        )
+
+        # 返回回复文本
+        if response.text:
+            return response.text
+        else:
+            return "错误: Gemini模型没有返回文本内容"
+
+    except Exception as e:
+        error_msg = str(e)
+        logger.error(f"❌ call_gemini error: {error_msg}")
+        return f"调用Gemini API时出错:\n{error_msg}"
 
 if __name__ == "__main__":
     mcp.run()

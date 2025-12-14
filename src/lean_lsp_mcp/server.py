@@ -157,8 +157,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
             lean_project_path=lean_project_path,
             client=None,
             rate_limit={
-                "leansearch": [],
                 "leandex": [],
+                "leansearch": [],
                 "loogle": [],
                 "leanfinder": [],
                 "lean_state_search": [],
@@ -937,6 +937,28 @@ def leansearch(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | s
 @log_tool_execution
 # @rate_limited("leandex", max_requests=3, per_seconds=30)
 def leandex(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
+    """Search for theorems and definitions using leandex.
+
+    Leandex is a semantic search engine for Lean codebases.
+    It uses a combination of natural language processing and machine learning to search for theorems and definitions.
+    It is more accurate and more stable than leansearch.net.
+    It's a good practice to query for more general / specific results and then use the results to refine the query if you failed to find the desired results.
+    You should use leandex instead of leansearch.
+
+    Query patterns:
+      - Natural language: "If there exist injective maps of sets from A to B and from B to A, then there exists a bijective map between A and B."
+      - Mixed natural/Lean: "natural numbers. from: n < m, to: n + 1 < m + 1", "n + 1 <= m if n < m"
+      - Concept names: "Cauchy Schwarz"
+      - Lean identifiers: "List.sum", "Finset induction"
+      - Lean term: "{f : A → B} {g : B → A} (hf : Injective f) (hg : Injective g) : ∃ h, Bijective h"
+
+    Args:
+        query (str): Search query
+        num_results (int, optional): Max results. Defaults to 5.
+
+    Returns:
+        List[Dict] | str: Search results or error msg
+    """
     logger.info(f"🔧 Tool: lean_leandex(query='{query}', num_results={num_results})")
     try:
 

@@ -884,55 +884,6 @@ def local_search(
         return f"lean_local_search error:\n{exc}"
 
 
-@mcp.tool("lean_leansearch")
-@log_tool_execution
-@rate_limited("leansearch", max_requests=3, per_seconds=30)
-def leansearch(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
-    """Search for Lean theorems, definitions, and tactics using leansearch.net.
-
-    Query patterns:
-      - Natural language: "If there exist injective maps of sets from A to B and from B to A, then there exists a bijective map between A and B."
-      - Mixed natural/Lean: "natural numbers. from: n < m, to: n + 1 < m + 1", "n + 1 <= m if n < m"
-      - Concept names: "Cauchy Schwarz"
-      - Lean identifiers: "List.sum", "Finset induction"
-      - Lean term: "{f : A → B} {g : B → A} (hf : Injective f) (hg : Injective g) : ∃ h, Bijective h"
-
-    Args:
-        query (str): Search query
-        num_results (int, optional): Max results. Defaults to 5.
-
-    Returns:
-        List[Dict] | str: Search results or error msg
-    """
-    logger.info(f"🔧 Tool: lean_leansearch(query='{query}', num_results={num_results})")
-    try:
-        headers = {"User-Agent": "lean-lsp-mcp/0.1", "Content-Type": "application/json"}
-        payload = orjson.dumps({"num_results": str(num_results), "query": [query]})
-
-        req = urllib.request.Request(
-            "https://leansearch.net/search",
-            data=payload,
-            headers=headers,
-            method="POST",
-        )
-
-        with urllib.request.urlopen(req, timeout=20) as response:
-            results = orjson.loads(response.read())
-
-        if not results or not results[0]:
-            return "No results found."
-        results = results[0][:num_results]
-        results = [r["result"] for r in results]
-
-        for result in results:
-            result.pop("docstring")
-            result["module_name"] = ".".join(result["module_name"])
-            result["name"] = ".".join(result["name"])
-
-        return results
-    except Exception as e:
-        return f"leansearch error:\n{str(e)}"
-
 @mcp.tool("lean_leandex")
 @log_tool_execution
 # @rate_limited("leandex", max_requests=3, per_seconds=30)
@@ -992,6 +943,56 @@ def leandex(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
 
     except Exception as e:
         return f"leandex error:\n{str(e)}"
+
+
+@mcp.tool("lean_leansearch")
+@log_tool_execution
+@rate_limited("leansearch", max_requests=3, per_seconds=30)
+def leansearch(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
+    """Search for Lean theorems, definitions, and tactics using leansearch.net.
+
+    Query patterns:
+      - Natural language: "If there exist injective maps of sets from A to B and from B to A, then there exists a bijective map between A and B."
+      - Mixed natural/Lean: "natural numbers. from: n < m, to: n + 1 < m + 1", "n + 1 <= m if n < m"
+      - Concept names: "Cauchy Schwarz"
+      - Lean identifiers: "List.sum", "Finset induction"
+      - Lean term: "{f : A → B} {g : B → A} (hf : Injective f) (hg : Injective g) : ∃ h, Bijective h"
+
+    Args:
+        query (str): Search query
+        num_results (int, optional): Max results. Defaults to 5.
+
+    Returns:
+        List[Dict] | str: Search results or error msg
+    """
+    logger.info(f"🔧 Tool: lean_leansearch(query='{query}', num_results={num_results})")
+    try:
+        headers = {"User-Agent": "lean-lsp-mcp/0.1", "Content-Type": "application/json"}
+        payload = orjson.dumps({"num_results": str(num_results), "query": [query]})
+
+        req = urllib.request.Request(
+            "https://leansearch.net/search",
+            data=payload,
+            headers=headers,
+            method="POST",
+        )
+
+        with urllib.request.urlopen(req, timeout=20) as response:
+            results = orjson.loads(response.read())
+
+        if not results or not results[0]:
+            return "No results found."
+        results = results[0][:num_results]
+        results = [r["result"] for r in results]
+
+        for result in results:
+            result.pop("docstring")
+            result["module_name"] = ".".join(result["module_name"])
+            result["name"] = ".".join(result["name"])
+
+        return results
+    except Exception as e:
+        return f"leansearch error:\n{str(e)}"
 
 
 @mcp.tool("lean_loogle")

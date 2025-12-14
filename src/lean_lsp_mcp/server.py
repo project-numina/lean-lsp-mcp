@@ -893,6 +893,7 @@ def leandex(ctx: Context, query: str, num_results: int = 5) -> List[Dict] | str:
     It uses a combination of natural language processing and machine learning to search for theorems and definitions.
     It's recommended to use leandex to search whether there exist relevant results before you start to prove a somewhat classic goal.
     It's a good practice to query for more general / specific results and then use the results to refine the query if you failed to find the desired results.
+    You can also use leandex to check the definition of a term or a concept.
 
     Query patterns:
       - Natural language: "If there exist injective maps of sets from A to B and from B to A, then there exists a bijective map between A and B."

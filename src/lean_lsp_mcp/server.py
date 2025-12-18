@@ -1201,6 +1201,16 @@ def gemini_code_golf(
     Returns:
         str: Gemini模型的回复或错误信息
     """
+
+    codes = re.findall(r"```lean4\n(.*?)\n```", ctx, re.DOTALL)
+    if len(codes) == 0:
+        codes = re.findall(r"```lean\n(.*?)\n```", ctx, re.DOTALL)
+        if len(codes) == 0:
+            logger.error("No valid lean4 code")
+        else:
+            code = codes[-1]
+    else:
+        code = codes[-1]
     
     PROMPT = """You are given a correct Lean 4 proof of a mathematical theorem.
 Your goal is to simplify and clean up the proof, making it shorter and more readable while ensuring it is still correct.
@@ -1212,9 +1222,9 @@ Here is the original proof:
 
 Now, provide your simplified proof. Do NOT modify the theorem or header, and surround your proof in ```lean4 and ```` tags."""
 
-    prompt = PROMPT.format(formal_code=str(ctx))
+    prompt = PROMPT.format(formal_code=str(code))
     print(prompt)
-    logger.info(f"🔧 Tool: call_gemini(prompt='{prompt[:50]}...', model={model}, temperature={temperature})")
+    logger.info(f"🔧 Tool: gemini_code_golf(prompt='{prompt[:50]}...', model={model}, temperature={temperature})")
     
 
     # 检查API密钥

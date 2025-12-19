@@ -15,4 +15,5 @@ INSTRUCTIONS = """## General Rules
 - lean_loogle: Search definitions and theorems by name, type, or subexpression.
 - lean_leanfinder: Semantic search for theorems using Lean Finder.
 - lean_state_search: Search theorems using goal-based search.
+- gemini_code_golf: Call Google Gemini model for code golf. Requires GOOGLE_API_KEY environment variable.
 """

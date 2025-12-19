@@ -1161,17 +1161,17 @@ def gemini_code_golf(
     model: str = "gemini-3-pro-preview",
     temperature: float = 0.7
 ) -> str:
-    """调用Google Gemini模型生成文本回复。
+    """This tool uses the Google Gemini model to simplify Lean code compiled by the compiler.
 
-    这个工具使用Google的Gemini API来生成文本回复。你需要设置GOOGLE_API_KEY环境变量。
+    It uses Google's Gemini API to generate text responses. You need to set the GOOGLE_API_KEY environment variable.
 
     Args:
-        lean_code (str, optional): 等待被golf的lean code。
-        model (str, optional): 使用的Gemini模型。默认是"gemini-3-pro-preview"
-        temperature (float, optional): 生成温度，控制随机性。默认0.7
+        lean_code (str, optional): The lean code to be golfed.
+        model (str, optional): The Gemini model to use. The default is "gemini-3-pro-preview".
+        temperature (float, optional): The generated temperature, controlling randomness. The default is 0.7.
 
     Returns:
-        str: Gemini模型的回复或错误信息
+        str: Gemini model response or error message
     """
     logger.info(f"🔧 Tool: gemini_code_golf(prompt='{lean_code[:10]}...', model={model}, temperature={temperature})")
 
@@ -1198,7 +1198,7 @@ Now, provide your simplified proof. Do NOT modify the theorem or header, and sur
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         logger.error("❌ No GEMINI_API_KEY")
-        return "错误: 请设置GEMINI_API_KEY环境变量。"
+        return "Error: Please set the GEMINI_API_KEY environment variable."
 
     try:
         # 配置Gemini
@@ -1218,12 +1218,12 @@ Now, provide your simplified proof. Do NOT modify the theorem or header, and sur
             return response.text
         else:
             logger.error("❌ No Response")
-            return "错误: Gemini模型没有返回文本内容"
+            return "Error: The Gemini model did not return any text content."
 
     except Exception as e:
         error_msg = str(e)
         logger.error(f"❌ call_gemini error: {error_msg}")
-        return f"调用Gemini API时出错:\n{error_msg}"
+        return f"Error calling Gemini API:\n{error_msg}"
 
 if __name__ == "__main__":
     mcp.run()

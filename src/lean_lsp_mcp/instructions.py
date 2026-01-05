@@ -45,25 +45,83 @@ Instructions:
 Problem Statement: {problem}"""
 
 
-VERIFY_PROMPT = """## Instruction: 
-Please act as a strict math grader. Review the following problem and the student's solution.
+VERIFY_PROMPT = """Your task is to evaluate the quality of a solution to a problem. The problem may ask for a proof of a statement, or ask for an answer. If finding an answer is required, the solution should present the answer, and it should also be a rigorous proof of that answer being valid.
 
-Task:
+Please evaluate the solution and score it according to the following criteria:
 
-Go through the student's solution line by line. For each line, determine if the mathematical logic and calculation are valid based on the previous line.
+- If the solution is completely correct, with all steps executed properly and clearly demonstrated, then the score is 1
 
-Output Format:
+- If the solution is generally correct, but with some details omitted or minor errors, then the score is 0.5
 
-Step 1: [Valid/Invalid] - [Reason]
+- If the solution does not actually address the required problem, contains fatal errors, or has severe omissions, then the score is 0
 
-Step 2: [Valid/Invalid] - [Reason]
+- Additionally, referencing anything from any paper does not save the need to prove the reference. It's okay IF AND ONLY IF the solution also presents a valid proof of the reference argument(s); otherwise, if the solution omits the proof or if the proof provided is not completely correct, the solution should be scored according to the criteria above, and definitely not with a score of 1
 
-...
+Please carefully reason out and analyze the quality of the solution below, and in your final response present a detailed evaluation of the solution's quality followed by your score.
 
-Final Grade: [Pass/Fail]
+Therefore, your response should be in the following format:
 
-## Input:
+Here is my evaluation of the solution:
 
-The Problem: {problem}
+[Your evaluation here. You are required to present in detail the key steps of the solution or the steps for which you had doubts regarding their correctness, and explicitly analyze whether each step is accurate: for correct steps, explain why you initially doubted their correctness and why they are indeed correct; for erroneous steps, explain the reason for the error and the impact of that error on the solution.]
 
-The Student's Solution: {student_solution}"""
+Based on my evaluation, the final overall score should be: \\boxed{{...}}
+
+[where ... should be the final overall score (0, 0.5, or 1, and nothing else) based on the above criteria]
+
+---
+
+Here is your task input:
+
+## Problem
+{problem}
+
+## Solution
+{student_solution}"""
+
+
+REFINEMENT_PROMPT_TEMPLATE = """You are given a mathematical problem, an existing solution, and feedback on that solution.
+
+Your task is to produce a **revised solution** that is more complete, rigorous, and clearly justified.
+
+---
+
+### Problem
+{problem}
+
+---
+
+### Previous Solution
+{solution}
+
+---
+
+### Feedback
+{feedback}
+
+---
+
+### Instructions
+
+- Carefully read the feedback and determine which points are **valid** and which may be due to **misunderstanding or evaluator error**.
+- If you **agree** with a feedback item:
+  - Revise the solution to fix the issue.
+  - Add missing steps, clarify logical transitions, or strengthen rigor as needed.
+- If you **disagree** with a feedback item:
+  - Keep the original reasoning if it is correct.
+  - Add **explicit explanations or clarifications** to prevent future misunderstandings.
+- Do **not** simply restate the feedback.
+- The final solution should be:
+  - Self-contained
+  - Logically coherent
+  - Mathematically rigorous
+  - Easy to follow for a careful reader
+
+---
+
+### Output Format
+
+Provide **only** the revised solution below.
+
+### Revised Solution
+"""

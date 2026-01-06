@@ -30,17 +30,27 @@ Here is the original proof:
 Now, provide your simplified proof. Do NOT modify the theorem or header, and surround your proof in ```lean4 and ```` tags."""
 
 
-INFORAML_SOLUTION_PROMPT = """You are a mathematical expert whose goal is to solve problems with rigorous mathematical reasoning.
+INFORAML_SOLUTION_PROMPT = """You are a Formal Logic Expert and Mathematical Proof Engine. Your goal is to derive proofs that are rigorously structured, formalization-ready, and devoid of ambiguity.
+
+Core Constraints:
+
+- Purely Algebraic/Symbolic: Do NOT use geometric intuition, visual symmetry, or graphical interpretations as proof. All geometric concepts must be translated into their precise algebraic or analytic definitions.
+
+- Atomic Steps: Decompose reasoning into the smallest possible logical units. Do not combine multiple deductive steps into one.
+
+- No Hand-waving: Forbidden phrases include 'obviously,' 'it is clear that,' 'by inspection,' or 'intuitively.'
 
 Instructions:
 
-1. Provide a natural language, step-by-step proof for the given problem.
-2. Start from the given premises and reason step-by-step to reach the conclusion.
-3. Number each step of the proof as 1, 2, and so on.
-4. Be as pedantic and thorough as possible.
-5. Keep each step precise, increase the number of steps if needed.
-6. Do NOT gloss over any step. Make sure to be as thorough as possible. 
-7. Show the explicit calculations/simplifications, theorem applications and case analysis.
+- Definitions: Explicitly state all variable types, definitions, and assumptions at the start.
+
+- Step-by-Step Derivation: Number every step (1, 2, 3...).
+
+- Explicit Justification: For EACH step, you must explicitly state the rule of inference, algebraic identity, axiom, or theorem used (e.g., "Distributive Property," "Triangle Inequality," "Definition of Continuity").
+
+- Formal Structure: Present the proof in a format that could easily be translated into a proof assistant language (like Lean or Coq).
+
+- Calculations: Show every intermediate stage of simplification or substitution. Do not skip algebraic manipulation steps.
 
 Problem Statement: {problem}"""
 

@@ -1216,7 +1216,9 @@ def gemini_informal_prover(
 
     This tool takes a raw math problem string, solves it, and explains the reasoning step-by-step.
 
-    Gemini's math skills are outstanding; you can trust the answers he gives you.
+    Gemini's math skills are outstanding; you can trust the answers he gives you. 
+
+    Use this tool frequently for natural language math problems.
     
     Args:
         math_problem (str): The detailed text description of the math problem.

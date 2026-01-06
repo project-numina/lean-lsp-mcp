@@ -28,7 +28,7 @@ from lean_lsp_mcp.client_utils import (
     infer_project_path,
 )
 from lean_lsp_mcp.file_utils import get_file_contents
-from lean_lsp_mcp.instructions import INSTRUCTIONS
+from lean_lsp_mcp.instructions import INFORAML_SOLUTION_PROMPT, GOLF_PROMPT, INSTRUCTIONS, VERIFY_PROMPT, REFINEMENT_PROMPT_TEMPLATE
 from lean_lsp_mcp.search_utils import check_ripgrep_status, lean_local_search
 from lean_lsp_mcp.outline_utils import generate_outline
 from lean_lsp_mcp.utils import (
@@ -163,6 +163,7 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
                 "lean_state_search": [],
                 "hammer_premise": [],
                 "gemini_code_golf": [],
+                "gemini_informal_prover": [],
             },
             lean_search_available=_RG_AVAILABLE,
         )
@@ -1168,18 +1169,8 @@ def gemini_code_golf(
         return "Error: No Code"
     else:
         code = lean_code
-    
-    PROMPT = """You are given a correct Lean 4 proof of a mathematical theorem.
-Your goal is to simplify and clean up the proof, making it shorter and more readable while ensuring it is still correct.
 
-Here is the original proof:
-```lean4
-{formal_code}
-```
-
-Now, provide your simplified proof. Do NOT modify the theorem or header, and surround your proof in ```lean4 and ```` tags."""
-
-    prompt = PROMPT.format(formal_code=str(code))
+    prompt = GOLF_PROMPT.format(formal_code=str(code))
     
     # 检查API密钥
     api_key = os.environ.get("GEMINI_API_KEY")
@@ -1211,6 +1202,122 @@ Now, provide your simplified proof. Do NOT modify the theorem or header, and sur
         error_msg = str(e)
         logger.error(f"❌ call_gemini error: {error_msg}")
         return f"Error calling Gemini API:\n{error_msg}"
+
+@mcp.tool("gemini_informal_prover")
+@log_tool_execution
+def gemini_informal_prover(
+    ctx: Context,
+    math_problem: str,
+    model: str = "gemini-3-pro-preview",
+    temperature: float = 0.7
+) -> str:
+    """
+    Use Google Gemini model to solve math problems and provide detailed solution.
+
+    This tool takes a raw math problem string, solves it, and explains the reasoning step-by-step.
+
+    Gemini's math skills are outstanding; you can trust the answers he gives you.
+    
+    Args:
+        math_problem (str): The detailed text description of the math problem.
+        model (str, optional): The Gemini model to use. The default is "gemini-3-pro-preview".
+        temperature (float, optional): The generated temperature, controlling randomness. The default is 0.7.
+
+    Returns:
+        str: The solution with step-by-step natural language explanation.
+    """
+    logger.info(f"🔧 Tool: gemini_informal_prover(problem='{math_problem[:20]}...', model={model})")
+
+    if not math_problem or len(math_problem.strip()) == 0:
+        logger.error("❌ No math problem provided")
+        return "Error: Please provide a valid math problem."
+    
+    # 检查API密钥
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("❌ No GEMINI_API_KEY")
+        return "Error: Please set the GEMINI_API_KEY environment variable."
+
+    # 配置尝试次数
+    max_attempts = 3  # generator和verifier都有3次机会
+
+    client = genai.Client(api_key=api_key)
+
+    solution = None
+    verification = None
+
+    def _call_gemini(prompt: str) -> Optional[str]:
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=prompt,
+                config=types.GenerateContentConfig(
+                    temperature=temperature # 数学问题建议使用较低的 temperature
+                )
+            )
+            if response.text:
+                return response.text
+            logger.warning("⚠️ Gemini returned empty response")
+            return None
+        except Exception as e:
+            logger.error(f"❌ Gemini API Error: {str(e)}")
+            return None
+
+    for gen_attempt in range(1, max_attempts + 1):
+        # 第一次使用原始prompt，后续使用refinement prompt
+        if gen_attempt == 1:
+            prompt_content = INFORAML_SOLUTION_PROMPT.format(problem=math_problem)
+        else:
+            if not verification:
+                logger.warning("⚠️ No verification feedback available for refinement")
+                break
+            prompt_content = REFINEMENT_PROMPT_TEMPLATE.format(
+                problem=math_problem,
+                solution=solution,
+                feedback=verification
+            )
+
+        solution = _call_gemini(prompt_content)
+
+        if not solution:
+            if gen_attempt == max_attempts:
+                return "Error: Failed to generate a solution from Gemini."
+            continue
+
+        verify_content = VERIFY_PROMPT.format(problem=math_problem, student_solution=solution)
+
+        verification = _call_gemini(verify_content)
+
+        if not verification:
+            logger.warning("⚠️ Verification step failed (API error)")
+            if gen_attempt == max_attempts:
+                return solution + "\n\n⚠️ Warning: Verification failed due to API error."
+            continue
+
+        # 匹配 \boxed{分数} 格式
+        pattern = r"\\boxed\{(.*?)\}"
+
+        match = re.search(pattern, verification)
+
+        is_pass = False
+        score_value = None
+        if match:
+            score_value = match.group(1).strip()
+            if score_value == "1":
+                is_pass = True
+            logger.info(f"🔍 Verification Score: {score_value} (Attempt {gen_attempt}/{max_attempts})")
+        else:
+            logger.warning("⚠️ Could not parse verification score from \\boxed{{...}}")
+
+        # 验证通过，直接返回
+        if is_pass:
+            return solution
+
+        # 最后一次尝试且未通过，返回solution + 警告 + verification
+        if gen_attempt == max_attempts:
+            return solution + f"\n\n⚠️ Warning: This solution may be wrong.\n\nVerification Result:\n{verification}"
+
+        # 否则继续下一轮refinement
 
 if __name__ == "__main__":
     mcp.run()

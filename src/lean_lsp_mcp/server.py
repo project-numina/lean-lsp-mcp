@@ -28,7 +28,7 @@ from lean_lsp_mcp.client_utils import (
     infer_project_path,
 )
 from lean_lsp_mcp.file_utils import get_file_contents
-from lean_lsp_mcp.instructions import INFORAML_SOLUTION_PROMPT, GOLF_PROMPT, INSTRUCTIONS, VERIFY_PROMPT, REFINEMENT_PROMPT_TEMPLATE
+from lean_lsp_mcp.instructions import INFORAML_SOLUTION_PROMPT, GOLF_PROMPT, INSTRUCTIONS, VERIFY_PROMPT, REFINEMENT_PROMPT_TEMPLATE, INFORMAL_LLM_CREATE_LEAN_SKETCH
 from lean_lsp_mcp.search_utils import check_ripgrep_status, lean_local_search
 from lean_lsp_mcp.outline_utils import generate_outline
 from lean_lsp_mcp.utils import (
@@ -164,6 +164,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
                 "hammer_premise": [],
                 "gemini_code_golf": [],
                 "gemini_informal_prover": [],
+                "discussion_partner": [],
+                "create_formal_sketch": [],
             },
             lean_search_available=_RG_AVAILABLE,
         )
@@ -1241,7 +1243,7 @@ def gemini_informal_prover(
         return "Error: Please set the GEMINI_API_KEY environment variable."
 
     # 配置尝试次数
-    max_attempts = 3  # generator和verifier都有3次机会
+    max_attempts = 6  # generator和verifier都有3次机会
 
     client = genai.Client(api_key=api_key)
 
@@ -1320,6 +1322,58 @@ def gemini_informal_prover(
             return solution + f"\n\n⚠️ Warning: This solution may be wrong.\n\nVerification Result:\n{verification}"
 
         # 否则继续下一轮refinement
+
+@mcp.tool("discussion_partner")
+@log_tool_execution
+def discussion_partner(
+    ctx: Context,
+    question: str,
+    model: str = "gemini-3-pro-preview",
+    temperature: float = 0.7
+) -> str:
+    """Use this tool to interact with a specialized partner model.
+
+    While this partner excels at mathematical reasoning and formalization, it is capable of discussing ANY TOPIC.
+
+    Args:
+        question (str): Any question that you want to discuss with Gemini.
+        model (str, optional): The partner model to use. The default is "gemini-3-pro-preview".
+        temperature (float, optional): The generated temperature, controlling randomness. The default is 0.7.
+
+    Returns:
+        str: The response of the question.
+    """
+
+    logger.info(f"🔧 Tool: discussion_partner(prompt='{question[:10]}...', model={model}, temperature={temperature})")
+
+    if len(question) == 0:
+        logger.error("❌ No valid question")
+        return "Error: No String"
+    
+    # 检查API密钥
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        logger.error("❌ No GEMINI_API_KEY")
+        return "Error: Please set the GEMINI_API_KEY environment variable."
+
+    try:
+        # 配置Gemini
+        client = genai.Client(api_key = api_key)
+        response = client.models.generate_content(
+            model=model,
+            contents=question,
+            config=types.GenerateContentConfig(
+                temperature=temperature 
+            )
+        )
+        if response.text:
+            return response.text
+        logger.warning("⚠️ Gemini returned empty response")
+        return None
+    except Exception as e:
+        logger.error(f"❌ Gemini API Error: {str(e)}")
+        return None
+
 
 if __name__ == "__main__":
     mcp.run()

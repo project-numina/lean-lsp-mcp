@@ -1212,38 +1212,38 @@ def gemini_informal_prover(
     math_problem: str,
     model: str = "gemini-3-pro-preview",
     temperature: float = 0.7
-) -> str:
+) -> List[str]:
     """
     Use Google Gemini model to solve math problems and provide detailed solution.
 
     This tool takes a raw math problem string, solves it, and explains the reasoning step-by-step.
 
-    Gemini's math skills are outstanding; you can trust the answers he gives you. 
+    Gemini's math skills are outstanding; you can trust the answers he gives you.
 
     Use this tool frequently for natural language math problems.
-    
+
     Args:
         math_problem (str): The detailed text description of the math problem.
         model (str, optional): The Gemini model to use. The default is "gemini-3-pro-preview".
         temperature (float, optional): The generated temperature, controlling randomness. The default is 0.7.
 
     Returns:
-        str: The solution with step-by-step natural language explanation.
+        List[str]: [solution, verification_result] where solution is the step-by-step explanation and verification_result is the Gemini verification judgment.
     """
     logger.info(f"🔧 Tool: gemini_informal_prover(problem='{math_problem[:20]}...', model={model})")
 
     if not math_problem or len(math_problem.strip()) == 0:
         logger.error("❌ No math problem provided")
-        return "Error: Please provide a valid math problem."
-    
+        return ["Error: Please provide a valid math problem.", ""]
+
     # 检查API密钥
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         logger.error("❌ No GEMINI_API_KEY")
-        return "Error: Please set the GEMINI_API_KEY environment variable."
+        return ["Error: Please set the GEMINI_API_KEY environment variable.", ""]
 
     # 配置尝试次数
-    max_attempts = 6  # generator和verifier都有3次机会
+    max_attempts = 20  # generator和verifier都有3次机会
 
     client = genai.Client(api_key=api_key)
 
@@ -1267,6 +1267,21 @@ def gemini_informal_prover(
             logger.error(f"❌ Gemini API Error: {str(e)}")
             return None
 
+    def _verify_solution(verify_content: str) -> Optional[str]:
+        """verify 3 times"""
+        pattern = r"\\boxed\{(.*?)\}"
+        last_feedback = None
+        for i in range(3):
+            feedback = _call_gemini(verify_content)
+            if not feedback:
+                return None
+            last_feedback = feedback
+            match = re.search(pattern, feedback)
+            score = match.group(1).strip() if match else None
+            if score != "1":
+                return feedback  # !=1，return feedback
+        return last_feedback
+
     for gen_attempt in range(1, max_attempts + 1):
         # 第一次使用原始prompt，后续使用refinement prompt
         if gen_attempt == 1:
@@ -1285,41 +1300,32 @@ def gemini_informal_prover(
 
         if not solution:
             if gen_attempt == max_attempts:
-                return "Error: Failed to generate a solution from Gemini."
+                return ["Error: Failed to generate a solution from Gemini.", ""]
             continue
 
         verify_content = VERIFY_PROMPT.format(problem=math_problem, student_solution=solution)
 
-        verification = _call_gemini(verify_content)
+        verification = _verify_solution(verify_content)
 
         if not verification:
             logger.warning("⚠️ Verification step failed (API error)")
             if gen_attempt == max_attempts:
-                return solution + "\n\n⚠️ Warning: Verification failed due to API error."
+                return [solution, "Gemini verification result is: API error"]
             continue
 
-        # 匹配 \boxed{分数} 格式
+        # 匹配 \boxed{分数} 格式，判断是否通过
         pattern = r"\\boxed\{(.*?)\}"
-
         match = re.search(pattern, verification)
+        score_value = match.group(1).strip() if match else None
+        logger.info(f"🔍 Verification Score: {score_value} (Attempt {gen_attempt}/{max_attempts})")
 
-        is_pass = False
-        score_value = None
-        if match:
-            score_value = match.group(1).strip()
-            if score_value == "1":
-                is_pass = True
-            logger.info(f"🔍 Verification Score: {score_value} (Attempt {gen_attempt}/{max_attempts})")
-        else:
-            logger.warning("⚠️ Could not parse verification score from \\boxed{{...}}")
-
-        # 验证通过，直接返回
-        if is_pass:
-            return solution
+        # 验证通过（3次都是1），直接返回
+        if score_value == "1":
+            return [solution, "Gemini verification result is: correct"]
 
         # 最后一次尝试且未通过，返回solution + 警告 + verification
         if gen_attempt == max_attempts:
-            return solution + f"\n\n⚠️ Warning: This solution may be wrong.\n\nVerification Result:\n{verification}"
+            return [solution, f"Gemini verification result is: Incorrect\n{verification}"]
 
         # 否则继续下一轮refinement
 

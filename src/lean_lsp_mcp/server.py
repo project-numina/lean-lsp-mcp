@@ -419,6 +419,7 @@ def diagnostic_messages(
     start_line_0 =  None
     end_line_0 =  None
 
+    # should be long enough to avoid misrejection
     timeout_second = 300
     start_time = time.time()
     diagnostics = client.get_diagnostics(

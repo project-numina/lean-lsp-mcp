@@ -418,13 +418,27 @@ def diagnostic_messages(
     # Convert 1-indexed to 0-indexed for leanclient
     start_line_0 =  None
     end_line_0 =  None
+    timeout_second = 300
+    start_time = time.time()
 
     diagnostics = client.get_diagnostics(
         rel_path,
         start_line=start_line_0,
         end_line=end_line_0,
-        inactivity_timeout=60.0,
+        inactivity_timeout = timeout_second,
     )
+    end_time = time.time()
+    duration = end_time - start_time
+    if duration >= timeout_second - 0.5:
+        logger.warning(f"🚫 lean_diagnostic_messages: Timeout after {duration} seconds")
+        message = "Timeout: Lean diagnostic messages took too long to compute.\n"
+        message += "Refactor your code, try more efficient methods, and reduce brute-force enumeration."
+        try:
+            client.close_files([rel_path])
+        except Exception as exc:
+            logger.warning(f"Failed to close file {rel_path} after timeout: {exc}")
+        client.open_file(rel_path)
+        return [message]
 
     return format_diagnostics(diagnostics)
 
@@ -1205,6 +1219,24 @@ def gemini_code_golf(
         logger.error(f"❌ call_gemini error: {error_msg}")
         return f"Error calling Gemini API:\n{error_msg}"
 
+# ============ Gemini Prover 调用记录 ============
+_GEMINI_LOG_DIR = os.environ.get("MCP_LOG_DIR", "Your default path")
+_GEMINI_PROVER_LOG = os.path.join(_GEMINI_LOG_DIR, "gemini_prover_history.jsonl")
+
+def _log_gemini_prover_call(math_problem: str, solution: str, verification: str):
+    """记录 gemini_informal_prover 调用结果"""
+    record = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        "math_problem": math_problem,
+        "solution": solution,
+        "verification": verification
+    }
+    try:
+        with open(_GEMINI_PROVER_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning(f"Failed to log gemini prover call: {e}")
+
 @mcp.tool("gemini_informal_prover")
 @log_tool_execution
 def gemini_informal_prover(
@@ -1310,6 +1342,7 @@ def gemini_informal_prover(
         if not verification:
             logger.warning("⚠️ Verification step failed (API error)")
             if gen_attempt == max_attempts:
+                _log_gemini_prover_call(math_problem, solution, "Gemini verification result is: API error")
                 return [solution, "Gemini verification result is: API error"]
             continue
 
@@ -1321,10 +1354,12 @@ def gemini_informal_prover(
 
         # 验证通过（3次都是1），直接返回
         if score_value == "1":
+            _log_gemini_prover_call(math_problem, solution, "Gemini verification result is: correct")
             return [solution, "Gemini verification result is: correct"]
 
         # 最后一次尝试且未通过，返回solution + 警告 + verification
         if gen_attempt == max_attempts:
+            _log_gemini_prover_call(math_problem, solution, f"Gemini verification result is: Incorrect\n{verification}")
             return [solution, f"Gemini verification result is: Incorrect\n{verification}"]
 
         # 否则继续下一轮refinement

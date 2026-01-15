@@ -16,6 +16,7 @@ dependencies = [
     "ipykernel>=7.1.0",
     "google>=3.0.0",
     "google-genai>=1.52.0",
+    "openai>=1.0.0",
 ]
 
 [project.urls]

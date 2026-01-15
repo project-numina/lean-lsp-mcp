@@ -16,6 +16,7 @@ from pathlib import Path
 import json
 from google import genai
 from google.genai import types
+from openai import OpenAI
 
 from mcp.server.fastmcp import Context, FastMCP
 from mcp.server.fastmcp.utilities.logging import get_logger, configure_logging
@@ -164,8 +165,8 @@ async def app_lifespan(server: FastMCP) -> AsyncIterator[AppContext]:
                 "hammer_premise": [],
                 "gemini_code_golf": [],
                 "gemini_informal_prover": [],
+                "gpt_informal_prover": [],
                 "discussion_partner": [],
-                "create_formal_sketch": [],
             },
             lean_search_available=_RG_AVAILABLE,
         )
@@ -1364,56 +1365,246 @@ def gemini_informal_prover(
 
         # 否则继续下一轮refinement
 
+# ============ GPT Prover 调用记录 ============
+_GPT_LOG_DIR = os.environ.get("MCP_LOG_DIR", "Your default path")
+_GPT_PROVER_LOG = os.path.join(_GPT_LOG_DIR, "gpt_prover_history.jsonl")
+
+def _log_gpt_prover_call(math_problem: str, solution: str, verification: str):
+    """记录 gpt_informal_prover 调用结果"""
+    record = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S", time.localtime()),
+        "math_problem": math_problem,
+        "solution": solution,
+        "verification": verification
+    }
+    try:
+        with open(_GPT_PROVER_LOG, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception as e:
+        logger.warning(f"Failed to log gpt prover call: {e}")
+
+@mcp.tool("gpt_informal_prover")
+@log_tool_execution
+def gpt_informal_prover(
+    ctx: Context,
+    math_problem: str,
+    model: str = "gpt-5.2-pro",
+    temperature: float = 0.7
+) -> List[str]:
+    """
+    Use OpenAI GPT model to solve math problems and provide detailed solution.
+
+    This tool takes a raw math problem string, solves it, and explains the reasoning step-by-step.
+
+    GPT's math skills are outstanding; you can trust the answers he gives you.
+
+    Use this tool frequently for natural language math problems.
+
+    Args:
+        math_problem (str): The detailed text description of the math problem.
+        model (str, optional): The GPT model to use. The default is "gpt-5.2-pro".
+        temperature (float, optional): The generated temperature, controlling randomness. The default is 0.7.
+
+    Returns:
+        List[str]: [solution, verification_result] where solution is the step-by-step explanation and verification_result is the GPT verification judgment.
+    """
+    logger.info(f"🔧 Tool: gpt_informal_prover(problem='{math_problem[:20]}...', model={model})")
+
+    if not math_problem or len(math_problem.strip()) == 0:
+        logger.error("❌ No math problem provided")
+        return ["Error: Please provide a valid math problem.", ""]
+
+    # 检查API密钥
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        logger.error("❌ No OPENAI_API_KEY")
+        return ["Error: Please set the OPENAI_API_KEY environment variable.", ""]
+
+    # 配置尝试次数
+    max_attempts = 5
+
+    client = OpenAI(api_key=api_key)
+
+    solution = None
+    verification = None
+
+    def _call_gpt(prompt: str) -> Optional[str]:
+        try:
+            response = client.responses.create(
+                model=model,
+                input=prompt,
+                reasoning={
+                    "effort": "high"
+                },
+                text={
+                    "verbosity": "high"
+                }
+            )
+            if response.output:
+                return response.output[-1].content[0].text
+            logger.warning("⚠️ GPT returned empty response")
+            return None
+        except Exception as e:
+            logger.error(f"❌ GPT API Error: {str(e)}")
+            return None
+
+    def _verify_solution(verify_content: str) -> Optional[str]:
+        """verify 2 times"""
+        pattern = r"\\boxed\{(.*?)\}"
+        last_feedback = None
+        for i in range(2):
+            feedback = _call_gpt(verify_content)
+            if not feedback:
+                return None
+            last_feedback = feedback
+            match = re.search(pattern, feedback)
+            score = match.group(1).strip() if match else None
+            if score != "1":
+                return feedback  # !=1，return feedback
+        return last_feedback
+
+    for gen_attempt in range(1, max_attempts + 1):
+        # 第一次使用原始prompt，后续使用refinement prompt
+        if gen_attempt == 1:
+            prompt_content = INFORAML_SOLUTION_PROMPT.format(problem=math_problem)
+        else:
+            if not verification:
+                logger.warning("⚠️ No verification feedback available for refinement")
+                break
+            prompt_content = REFINEMENT_PROMPT_TEMPLATE.format(
+                problem=math_problem,
+                solution=solution,
+                feedback=verification
+            )
+
+        solution = _call_gpt(prompt_content)
+
+        if not solution:
+            if gen_attempt == max_attempts:
+                return ["Error: Failed to generate a solution from GPT.", ""]
+            continue
+
+        verify_content = VERIFY_PROMPT.format(problem=math_problem, student_solution=solution)
+
+        verification = _verify_solution(verify_content)
+
+        if not verification:
+            logger.warning("⚠️ Verification step failed (API error)")
+            if gen_attempt == max_attempts:
+                _log_gpt_prover_call(math_problem, solution, "GPT verification result is: API error")
+                return [solution, "GPT verification result is: API error"]
+            continue
+
+        # 匹配 \boxed{分数} 格式，判断是否通过
+        pattern = r"\\boxed\{(.*?)\}"
+        match = re.search(pattern, verification)
+        score_value = match.group(1).strip() if match else None
+        logger.info(f"🔍 Verification Score: {score_value} (Attempt {gen_attempt}/{max_attempts})")
+
+        # 验证通过（3次都是1），直接返回
+        if score_value == "1":
+            _log_gpt_prover_call(math_problem, solution, "GPT verification result is: correct")
+            return [solution, "GPT verification result is: correct"]
+
+        # 最后一次尝试且未通过，返回solution + 警告 + verification
+        if gen_attempt == max_attempts:
+            _log_gpt_prover_call(math_problem, solution, f"GPT verification result is: Incorrect\n{verification}")
+            return [solution, f"GPT verification result is: Incorrect\n{verification}"]
+
+        # 否则继续下一轮refinement
+
 @mcp.tool("discussion_partner")
 @log_tool_execution
 def discussion_partner(
     ctx: Context,
     question: str,
-    model: str = "gemini-3-pro-preview",
-    temperature: float = 0.7
+    model: str = "gemini"
 ) -> str:
-    """Use this tool to interact with a specialized partner model.
+    """Use this tool to interact with a specialized partner model for proof strategies, reasoning, and formalization.
 
-    While this partner excels at mathematical reasoning and formalization, it is capable of discussing ANY TOPIC.
+    You can send Lean 4 code, natural language math problems, or proof strategies to different models
+    and get their suggestions. This is useful for:
+    - Discussing proof strategies and approaches
+    - Getting alternative reasoning paths
+    - Comparing suggestions from different models
+    - Debugging stuck proofs
 
     Args:
-        question (str): Any question that you want to discuss with Gemini.
-        model (str, optional): The partner model to use. The default is "gemini-3-pro-preview".
-        temperature (float, optional): The generated temperature, controlling randomness. The default is 0.7.
+        question (str): Lean code, math problem, or any question you want to discuss.
+        model (str): Choose "gemini" (Google gemini-3-pro-preview) or "gpt" (OpenAI gpt-5.2-pro). Default is "gemini".
 
     Returns:
-        str: The response of the question.
+        str: The model's response.
     """
 
-    logger.info(f"🔧 Tool: discussion_partner(prompt='{question[:10]}...', model={model}, temperature={temperature})")
+    logger.info(f"🔧 Tool: discussion_partner(prompt='{question[:10]}...', model={model})")
 
     if len(question) == 0:
         logger.error("❌ No valid question")
-        return "Error: No String"
-    
-    # 检查API密钥
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        logger.error("❌ No GEMINI_API_KEY")
-        return "Error: Please set the GEMINI_API_KEY environment variable."
+        return "Error: No question provided"
 
-    try:
-        # 配置Gemini
-        client = genai.Client(api_key = api_key)
-        response = client.models.generate_content(
-            model=model,
-            contents=question,
-            config=types.GenerateContentConfig(
-                temperature=temperature 
+    # Model mapping
+    MODEL_MAP = {
+        "gemini": "gemini-3-pro-preview",
+        "gpt": "gpt-5.2-pro"
+    }
+
+    if model not in MODEL_MAP:
+        logger.error("❌ Error: model must be 'gemini' or 'gpt'")
+        return f"Error: model must be 'gemini' or 'gpt', got '{model}'"
+
+    actual_model = MODEL_MAP[model]
+
+    if model == "gemini":
+        # Call Gemini API
+        api_key = os.environ.get("GEMINI_API_KEY")
+        if not api_key:
+            logger.error("❌ No GEMINI_API_KEY")
+            return "Error: Please set the GEMINI_API_KEY environment variable."
+
+        try:
+            client = genai.Client(api_key=api_key)
+            response = client.models.generate_content(
+                model=actual_model,
+                contents=question,
+                config=types.GenerateContentConfig(
+                    temperature=0.7
+                )
             )
-        )
-        if response.text:
-            return response.text
-        logger.warning("⚠️ Gemini returned empty response")
-        return None
-    except Exception as e:
-        logger.error(f"❌ Gemini API Error: {str(e)}")
-        return None
+            if response.text:
+                return response.text
+            logger.warning("⚠️ Gemini returned empty response")
+            return "Error: Gemini returned empty response"
+        except Exception as e:
+            logger.error(f"❌ Gemini API Error: {str(e)}")
+            return f"Error calling Gemini API: {str(e)}"
+
+    elif model == "gpt":
+        # Call OpenAI GPT-5.2-pro via Responses API
+        api_key = os.environ.get("OPENAI_API_KEY")
+        if not api_key:
+            logger.error("❌ No OPENAI_API_KEY")
+            return "Error: Please set the OPENAI_API_KEY environment variable."
+
+        try:
+            client = OpenAI(api_key=api_key)
+            response = client.responses.create(
+                model=actual_model,
+                input=question,
+                reasoning={
+                    "effort": "high"
+                },
+                text={
+                    "verbosity": "high"
+                }
+            )
+            if response.output:
+                return response.output[-1].content[0].text
+            logger.warning("⚠️ GPT returned empty response")
+            return "Error: GPT returned empty response"
+        except Exception as e:
+            logger.error(f"❌ OpenAI API Error: {str(e)}")
+            return f"Error calling OpenAI API: {str(e)}"
 
 
 if __name__ == "__main__":

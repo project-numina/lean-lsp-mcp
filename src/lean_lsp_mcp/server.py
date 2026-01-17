@@ -419,12 +419,27 @@ def diagnostic_messages(
     start_line_0 =  None
     end_line_0 =  None
 
+    # should be long enough to avoid misrejection
+    timeout_second = 300
+    start_time = time.time()
     diagnostics = client.get_diagnostics(
         rel_path,
         start_line=start_line_0,
         end_line=end_line_0,
-        inactivity_timeout=60.0,
+        inactivity_timeout=timeout_second,
     )
+    end_time = time.time()
+    duration = end_time - start_time
+    if duration >= timeout_second - 0.5:
+        logger.warning(f"🚫 lean_diagnostic_messages: Timeout after {duration} seconds")
+        message = "Timeout: Lean diagnostic messages took too long to compute.\n"
+        message += "Refactor your code, try more efficient methods, and reduce brute-force enumeration."
+        try:
+            client.close_files([rel_path])
+        except Exception as exc:
+            logger.warning(f"Failed to close file {rel_path} after timeout: {exc}")
+        client.open_file(rel_path)
+        return [message]
 
     return format_diagnostics(diagnostics)
 

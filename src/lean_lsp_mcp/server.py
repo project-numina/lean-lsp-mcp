@@ -398,7 +398,6 @@ def diagnostic_messages(
     """Get all diagnostic msgs (errors, warnings, infos) for a Lean file.
 
     "no goals to be solved" means code may need removal.
-    If it returns an empty list, it means some error occurred. You should dismiss this result and try again.
 
     Args:
         file_path (str): Abs path to Lean file

@@ -1257,6 +1257,10 @@ def gemini_informal_prover(
 
     Use this tool frequently for natural language math problems.
 
+    You should mention that you’re aiming to formalize the solution in Lean 4, and ask Gemini for a detailed solution that would be easier to formalize.
+    Once you receive Gemini’s solution, use leandex to search mathlib for relevant theorems and lemmas.
+    If you discover that some necessary infrastructure is missing in mathlib, immediately switch to informal_prover: provide it with Gemini’s solution, explain what is missing, and ask it to propose an alternative approach that avoids those gaps or requires less infrastructure.
+
     Args:
         math_problem (str): The detailed text description of the math problem.
         model (str, optional): The Gemini model to use. The default is "gemini-3-pro-preview".
@@ -1278,7 +1282,7 @@ def gemini_informal_prover(
         return ["Error: Please set the GEMINI_API_KEY environment variable.", ""]
 
     # 配置尝试次数
-    max_attempts = 20  # generator和verifier都有3次机会
+    max_attempts = 10  # generator和verifier都有3次机会
 
     client = genai.Client(api_key=api_key)
 
@@ -1306,7 +1310,7 @@ def gemini_informal_prover(
         """verify 3 times"""
         pattern = r"\\boxed\{(.*?)\}"
         last_feedback = None
-        for i in range(3):
+        for i in range(1):
             feedback = _call_gemini(verify_content)
             if not feedback:
                 return None
@@ -1402,6 +1406,10 @@ def gpt_informal_prover(
 
     Use this tool frequently for natural language math problems.
 
+    You should mention that you’re aiming to formalize the solution in Lean 4, and ask Gemini for a detailed solution that would be easier to formalize.
+    Once you receive Gemini’s solution, use leandex to search mathlib for relevant theorems and lemmas.
+    If you discover that some necessary infrastructure is missing in mathlib, immediately switch to informal_prover: provide it with Gemini’s solution, explain what is missing, and ask it to propose an alternative approach that avoids those gaps or requires less infrastructure.
+
     Args:
         math_problem (str): The detailed text description of the math problem.
         model (str, optional): The GPT model to use. The default is "gpt-5.2-pro".
@@ -1423,7 +1431,7 @@ def gpt_informal_prover(
         return ["Error: Please set the OPENAI_API_KEY environment variable.", ""]
 
     # 配置尝试次数
-    max_attempts = 5
+    max_attempts = 3
 
     client = OpenAI(api_key=api_key)
 
@@ -1454,7 +1462,7 @@ def gpt_informal_prover(
         """verify 2 times"""
         pattern = r"\\boxed\{(.*?)\}"
         last_feedback = None
-        for i in range(2):
+        for i in range(1):
             feedback = _call_gpt(verify_content)
             if not feedback:
                 return None

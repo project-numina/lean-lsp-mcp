@@ -136,6 +136,14 @@ def log_tool_execution(func):
                 raise
         
         return sync_wrapper
+
+def run_in_thread(func):
+    """将同步阻塞函数包装为 async，在独立线程中执行，避免阻塞事件循环"""
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        return await asyncio.to_thread(func, *args, **kwargs)
+    return wrapper
+
 # Server and context
 @dataclass
 class AppContext:
@@ -1242,6 +1250,7 @@ def _log_gemini_prover_call(math_problem: str, solution: str, verification: str)
 
 @mcp.tool("gemini_informal_prover")
 @log_tool_execution
+@run_in_thread
 def gemini_informal_prover(
     ctx: Context,
     math_problem: str,
@@ -1391,6 +1400,7 @@ def _log_gpt_prover_call(math_problem: str, solution: str, verification: str):
 
 @mcp.tool("gpt_informal_prover")
 @log_tool_execution
+@run_in_thread
 def gpt_informal_prover(
     ctx: Context,
     math_problem: str,
@@ -1525,6 +1535,7 @@ def gpt_informal_prover(
 
 @mcp.tool("discussion_partner")
 @log_tool_execution
+@run_in_thread
 def discussion_partner(
     ctx: Context,
     question: str,

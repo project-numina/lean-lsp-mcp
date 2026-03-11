@@ -1,10 +1,12 @@
 import os
+import urllib.parse
 from pathlib import Path
 from threading import Lock
 
 from mcp.server.fastmcp import Context
 from mcp.server.fastmcp.utilities.logging import get_logger
 from leanclient import LeanLSPClient
+from leanclient.base_client import BaseLeanLSPClient
 
 from lean_lsp_mcp.file_utils import get_relative_file_path
 from lean_lsp_mcp.utils import OutputCapture
@@ -12,6 +14,99 @@ from lean_lsp_mcp.utils import OutputCapture
 
 logger = get_logger(__name__)
 CLIENT_LOCK = Lock()
+
+
+# ---------------------------------------------------------------------------
+# Monkey-patch leanclient to avoid resolving symlinks.
+#
+# BaseLeanLSPClient uses Path.resolve() in three places, which follows
+# symlinks.  This breaks the "isolated .lake with symlinked sources"
+# approach because the resolved path escapes the isolated project dir.
+#
+# We replace .resolve() with os.path.abspath() which normalises ".." but
+# does NOT follow symlinks.  Behaviour is identical when no symlinks exist.
+# ---------------------------------------------------------------------------
+
+def _patched_init(self, project_path, initial_build=False, prevent_cache_get=False):
+    """BaseLeanLSPClient.__init__ with abspath instead of resolve."""
+    import subprocess
+    import threading
+    import asyncio
+    import atexit
+    from leanclient.utils import SemanticTokenProcessor, has_mathlib_dependency
+
+    self.project_path = Path(os.path.abspath(project_path))
+    self.request_id = 0
+
+    if initial_build:
+        self.build_project(get_cache=not prevent_cache_get)
+    elif not prevent_cache_get and has_mathlib_dependency(self.project_path):
+        subprocess.run(
+            ["lake", "exe", "cache", "get"],
+            cwd=self.project_path,
+            check=False,
+            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+        )
+
+    self.process = subprocess.Popen(
+        ["lake", "serve"],
+        cwd=self.project_path,
+        stdout=subprocess.PIPE,
+        stdin=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+    )
+    self.stdin = self.process.stdin
+    self.stdout = self.process.stdout
+
+    self._loop = asyncio.new_event_loop()
+    self._futures = {}
+    self._notification_handlers = {}
+
+    self._loop_thread = threading.Thread(target=self._run_event_loop, daemon=True)
+    self._loop_thread.start()
+
+    self._stdout_thread_stop_event = threading.Event()
+    self._stdout_thread = threading.Thread(
+        target=self._read_stdout_loop,
+        args=(self._stdout_thread_stop_event,),
+        daemon=True,
+    )
+    self._stdout_thread.start()
+
+    server_info = self._send_request_sync(
+        "initialize",
+        {
+            "processId": os.getpid(),
+            "rootUri": self._local_to_uri(self.project_path),
+            "initializationOptions": {"editDelay": 1},
+        },
+    )
+
+    legend = server_info["capabilities"]["semanticTokensProvider"]["legend"]
+    self.token_processor = SemanticTokenProcessor(legend["tokenTypes"])
+    self._send_notification("initialized", {})
+    atexit.register(self.close)
+
+
+def _patched_local_to_uri(self, local_path):
+    """Convert local path to URI without resolving symlinks."""
+    path = Path(os.path.abspath(self.project_path / Path(local_path)))
+    return urllib.parse.unquote(path.as_uri())
+
+
+def _patched_uri_to_local(self, uri):
+    """Convert URI to local relative path without resolving symlinks."""
+    abs_path = Path(os.path.abspath(self._uri_to_abs(uri)))
+    try:
+        return str(abs_path.relative_to(self.project_path))
+    except ValueError:
+        return str(abs_path)
+
+
+BaseLeanLSPClient.__init__ = _patched_init
+BaseLeanLSPClient._local_to_uri = _patched_local_to_uri
+BaseLeanLSPClient._uri_to_local = _patched_uri_to_local
 
 
 def startup_client(ctx: Context):
